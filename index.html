@@ -246,6 +246,7 @@ const BASE_CATS=[
  {id:'casa',name:'Casa, reformas e eletrônicos',ico:'🛋️',k:'d',flex:1},
  {id:'outros_desp',name:'Outras despesas',ico:'📦',k:'d'},
  {id:'cnpj',name:'CNPJ',ico:'🏪',k:'b'},
+ {id:'fatura',name:'Fatura do cartão',ico:'💳',k:'d'},
  {id:'alimentacao',name:'Alimentação',ico:'🍎',k:'d'},
  {id:'assinaturas',name:'Assinaturas',ico:'🔁',k:'d',flex:1}
 ];
@@ -287,7 +288,11 @@ const DB={db:null,mem:{},
 };
 const D={tx:[],fixed:[],cfg:{}};
 const CFG0=()=>({goal:80,yield:0.5,backup:{every:0,dest:'internal',lastSnap:0,lastExt:0,pending:false},notified:[],cats:[],removed:[],theme:'roxo'});
-const persist=()=>Promise.all([DB.set('tx',D.tx),DB.set('fixed',D.fixed),DB.set('cfg',D.cfg)]);
+const NATIVE=!!(window.Capacitor&&typeof Capacitor.isNativePlatform==='function'&&Capacitor.isNativePlatform());
+const _pl={};
+const PL=n=>{if(!NATIVE||typeof Capacitor.registerPlugin!=='function')return null;try{return _pl[n]||(_pl[n]=Capacitor.registerPlugin(n))}catch(e){return null}};
+let syncT;
+const persist=()=>{if(NATIVE){clearTimeout(syncT);syncT=setTimeout(()=>{if(typeof syncNative==='function')syncNative()},900)}return Promise.all([DB.set('tx',D.tx),DB.set('fixed',D.fixed),DB.set('cfg',D.cfg)])};
 const S={tab:'home',ym:ymOf(todayStr()),cm:ymOf(todayStr()),f:{sort:'date_desc',q:'',kind:'all',cat:''},ov:[],hist:true,simDep:null,swReg:null,cap:{dl:null,sample:null},persisted:null,dirOK:false};
 
 /* ================= categorias (padrão + personalizadas) ================= */
@@ -314,11 +319,11 @@ function applyTheme(name){
 /* ================= regras de cálculo ================= */
 const txMonth=ym=>D.tx.filter(t=>t.date.startsWith(ym));
 const catOf=t=>t.sav?SAVCAT:(CATBY[t.cat]||CATBY.outros_desp);
-function stats(list){let rec=0,exp=0,card=0,dep=0,res=0;for(const t of list){if(t.sav){t.mov==='credito'?dep+=t.v:res+=t.v}else if(t.kind==='receita')rec+=t.v;else{exp+=t.v;if(t.card)card+=t.v}}return{rec,exp,card,deb:exp-card,dep,res,net:rec-exp-dep+res}}
-function carry(ym){let n=0;for(const t of D.tx){if(t.date.slice(0,7)>=ym)continue;if(t.sav)n+=t.mov==='credito'?-t.v:t.v;else n+=t.kind==='receita'?t.v:-t.v}return n}
+function stats(list){let rec=0,exp=0,card=0,dep=0,res=0;for(const t of list){if(t.card){card+=t.v;continue}if(t.sav){t.mov==='credito'?dep+=t.v:res+=t.v}else if(t.kind==='receita')rec+=t.v;else exp+=t.v}return{rec,exp,card,deb:exp,dep,res,net:rec-exp-dep+res}}
+function carry(ym){let n=0;for(const t of D.tx){if(t.date.slice(0,7)>=ym||t.card)continue;if(t.sav)n+=t.mov==='credito'?-t.v:t.v;else n+=t.kind==='receita'?t.v:-t.v}return n}
 const cardAfter=ym=>D.tx.reduce((s,t)=>s+(t.card&&t.date.slice(0,7)>ym?t.v:0),0);
-function catTotals(ym,upToDay){const o={};for(const t of D.tx){if(t.sav||t.kind!=='conta'||!t.date.startsWith(ym))continue;if(upToDay&&+t.date.slice(8,10)>upToDay)continue;o[t.cat]=(o[t.cat]||0)+t.v}return o}
-const spendOf=(ym,day)=>{let s=0;for(const t of D.tx){if(t.sav||t.kind!=='conta'||!t.date.startsWith(ym))continue;if(day&&+t.date.slice(8,10)>day)continue;s+=t.v}return s};
+function catTotals(ym,upToDay){const o={};for(const t of D.tx){if(t.sav||t.card||t.kind!=='conta'||!t.date.startsWith(ym))continue;if(upToDay&&+t.date.slice(8,10)>upToDay)continue;o[t.cat]=(o[t.cat]||0)+t.v}return o}
+const spendOf=(ym,day)=>{let s=0;for(const t of D.tx){if(t.sav||t.card||t.kind!=='conta'||!t.date.startsWith(ym))continue;if(day&&+t.date.slice(8,10)>day)continue;s+=t.v}return s};
 const incomeOf=ym=>{let s=0;for(const t of D.tx)if(!t.sav&&t.kind==='receita'&&t.date.startsWith(ym))s+=t.v;return s};
 const activeIn=(b,ym)=>ym>=b.start&&(!b.months||ym<=ymAdd(b.start,b.months-1));
 const billsFor=ym=>D.fixed.filter(b=>activeIn(b,ym)).sort((a,b)=>a.day-b.day);
@@ -547,7 +552,7 @@ function itemHtml(t){
  return `<button class="it" data-a="edit" data-id="${t.id}"><span class="ico">${c.ico}</span><span class="m"><div class="t">${esc(title)}${tags}</div><div class="s">${sub}</div></span><span class="a ${cls}">${sign} ${fmt(t.v)}</span></button>`;
 }
 function listHtml(){
- const all=txMonth(S.ym),sh=applyFilter(all);
+ const all=txMonth(S.ym).filter(t=>!t.card),sh=applyFilter(all);
  if(!all.length)return `<div class="list"><div class="empty">Nenhum lançamento em ${ymLabel(S.ym)}.<br>Toque em <b>Novo lançamento</b> para começar.</div></div>`;
  if(!sh.length)return `<div class="list"><div class="empty">Nenhum lançamento corresponde aos filtros.<br><button class="btn sm" style="margin-top:10px" data-a="freset">Limpar filtros</button></div></div>`;
  return `<div class="list">${sh.map(itemHtml).join('')}</div>`;
@@ -568,7 +573,7 @@ function dueBanner(){
 
 /* ================= início ================= */
 function vHome(){
- const ym=S.ym,st=stats(txMonth(ym)),cr=carry(ym),saldo=cr+st.net,fut=cardAfter(ym),nf=nFilters(),shown=txMonth(ym).length;
+ const ym=S.ym,st=stats(txMonth(ym)),cr=carry(ym),saldo=cr+st.net,fut=cardAfter(ym),nf=nFilters(),shown=0;
  return `<div class="hd"><div class="hrow"><div class="brand">Meu Bolso</div><div class="hsub">${ymLabel(ym)}</div></div>${monthNav()}${dueBanner()}</div>
 <div class="body pull">
 <section class="card"><h2>Resumo das finanças</h2><div class="grid2">
@@ -589,7 +594,7 @@ function filterHtml(){
  return `<div class="sheet"><div class="sh-h"><h2>Filtrar lançamentos</h2><button class="xb" data-a="close" aria-label="Fechar">✕</button></div><div class="sh-b">
  <div class="fld"><span class="lbl">Ordenar por</span><div class="chips">${ch('sort','date_desc','Data ↓ mais recente')}${ch('sort','date_asc','Data ↑ mais antiga')}${ch('sort','name_asc','Nome A–Z')}${ch('sort','name_desc','Nome Z–A')}</div></div>
  <div class="fld"><label for="fq">Nome do lançamento</label><input id="fq" class="inp" data-f="q" placeholder="Buscar por nome ou banco" value="${esc(f.q)}"></div>
- <div class="fld"><span class="lbl">Tipo de lançamento</span><div class="chips">${ch('kind','all','Todos')}${ch('kind','receita','Receitas')}${ch('kind','conta','Contas')}${ch('kind','card','Cartão')}${ch('kind','poup','Poupança')}</div></div>
+ <div class="fld"><span class="lbl">Tipo de lançamento</span><div class="chips">${ch('kind','all','Todos')}${ch('kind','receita','Receitas')}${ch('kind','conta','Contas')}${ch('kind','poup','Poupança')}</div></div>
  <div class="fld"><label for="fc">Categoria</label><select id="fc" class="inp" data-f="fcat"><option value="">Todas</option>${CATS.map(c=>`<option value="${c.id}" ${f.cat===c.id?'selected':''}>${c.ico} ${esc(c.name)}</option>`).join('')}</select></div>
  </div><div class="sh-f"><button class="btn ghost" data-a="freset">Redefinir filtros</button><button class="btn primary" data-a="close">Ver resultados</button></div></div>`;
 }
@@ -606,6 +611,8 @@ function cardHtml(){
  const chart=totY?`${lineSvg([{n:'Fatura',c:THEME.p,pts:vals,dots:1}],MESC.map(m=>m))}<div class="kv"><span>Soma das faturas em ${yr}</span><b>${fmt(totY)}</b></div><div class="kv"><span>Maior fatura</span><b>${MES[mxI]} · ${fmt(mx)}</b></div>`:`<div class="empty">Sem lançamentos no cartão em ${yr}.</div>`;
  return `<div class="scr-h"><div class="top"><button class="xb" data-a="close" aria-label="Voltar">‹</button><h2>Fatura do cartão</h2></div>${monthNav(ym,'cym','cymnow')}</div>
  <div class="body pull" style="max-width:640px;margin:0 auto"><section class="card"><div class="grid2"><div><div class="k">Fatura de ${MES[+ym.slice(5,7)-1]}</div><div class="v neg">${fmt(tot)}</div></div><div><div class="k">Resta nas próximas faturas</div><div class="v">${fmt(fut)}</div></div></div></section>
+ <button class="btn primary big" data-a="cardnew">＋ Novo lançamento no cartão</button>
+ <div class="hint" style="margin:-4px 2px 14px">As compras do cartão aparecem só aqui e não entram no saldo. Quando pagar a fatura, faça um lançamento de conta (categoria “Fatura do cartão”).</div>
  <div class="sech"><h2>Lançamentos no cartão</h2></div>
  <div class="list">${rows||'<div class="empty">Nenhum lançamento no cartão neste mês.</div>'}</div>
  <div class="sech" style="margin-top:16px"><h2>Evolução da fatura em ${yr}</h2></div><section class="card">${chart}</section>
@@ -670,7 +677,7 @@ function saveForm(){
   D.tx=D.tx.filter(x=>f.grp?x.grp!==f.grp:x.id!==f.id);
   if(old&&old.src&&list.length===1)list[0].src=old.src;
  }
- D.tx.push(...list);persist();closeTop();render();toast(f.edit?'Lançamento atualizado':'Lançamento salvo');
+ D.tx.push(...list);persist();closeTop();render();toast(f.card&&!f.sav&&f.kind==='conta'?'Salvo na fatura do cartão':f.edit?'Lançamento atualizado':'Lançamento salvo');
 }
 function askDelete(id){
  const t=D.tx.find(x=>x.id===id);if(!t)return;
@@ -724,7 +731,7 @@ function vSav(){
 function vFix(){
  const ym=S.ym,bills=billsFor(ym),today=todayStr();
  const total=bills.reduce((s,b)=>s+b.v,0),paid=bills.reduce((s,b)=>s+(isPaid(b,ym)?b.v:0),0),rest=total-paid;
- const perm=('Notification' in window)?Notification.permission:'unsupported';
+ const perm=notifState();
  const rows=bills.map(b=>{
   const p=isPaid(b,ym),due=dateInYM(ym,b.day),late=!p&&due<today;
   const al=b.alert?`Alerta ${b.before?b.before+(b.before>1?' dias antes':' dia antes'):'no dia'}, ${b.time}`:'Sem alerta';
@@ -734,10 +741,10 @@ function vFix(){
 <section class="card"><div class="grid2"><div><div class="k">Total das contas fixas</div><div class="v">${fmt(total)}</div></div><div><div class="k">Já pago</div><div class="v pos">${fmt(paid)}</div></div></div>
 <div class="k" style="margin-top:12px">Resta pagar</div><div class="v neg">${fmt(rest)}</div><div class="prog"><i style="width:${total?Math.round(paid/total*100):0}%"></i></div></section>
 <button class="btn primary big" data-a="fxnew">＋ Nova conta fixa</button>
-${perm==='granted'?'':`<section class="card opt"><h3>🔔 Ative os avisos</h3><p>${perm==='denied'?'As notificações estão bloqueadas para este app. Libere nas configurações do navegador (ícone de cadeado, ao lado do endereço).':perm==='unsupported'?'Este navegador não permite notificações. Use o calendário para receber os lembretes.':'Permita notificações para que o celular avise sobre as contas fixas.'}</p>${perm==='default'?'<button class="btn sm primary" data-a="notif">Permitir notificações</button>':''}</section>`}
+${perm==='granted'?'':`<section class="card opt"><h3>🔔 Ative os avisos</h3><p>${perm==='denied'?'As notificações estão bloqueadas para este app. Libere em Configurações do Android > Apps > Meu Bolso > Notificações.':perm==='unsupported'?'Este navegador não permite notificações. Use o calendário para receber os lembretes.':'Permita notificações para que o celular avise sobre as contas fixas.'}</p>${perm==='default'?'<button class="btn sm primary" data-a="notif">Permitir notificações</button>':''}</section>`}
 <div class="sech"><h2>Contas de ${MES[+ym.slice(5,7)-1]}</h2></div>
 <div class="list">${rows||'<div class="empty">Nenhuma conta fixa neste mês.<br>Cadastre aluguel, internet, escola e outras contas que se repetem todo mês.</div>'}</div>
-${bills.length?`<section class="card opt" style="margin-top:14px"><h3>Lembretes no calendário</h3><p>Gera um arquivo .ics com os próximos 12 vencimentos. Importe no Google Agenda para receber o aviso mesmo com o app fechado.</p><button class="btn sm" data-a="fxics">Exportar lembretes (.ics)</button></section>`:''}
+${bills.length?`<section class="card opt" style="margin-top:14px"><h3>Lembretes no calendário</h3><p>${NATIVE?'Gera um arquivo .ics com os próximos 12 vencimentos para importar em um calendário, se você quiser um segundo aviso.':'Gera um arquivo .ics com os próximos 12 vencimentos. Importe no Google Agenda para receber o aviso mesmo com o app fechado.'}</p><button class="btn sm" data-a="fxics">Exportar lembretes (.ics)</button></section>`:''}
 <div class="endpad"></div></div>`;
 }
 let FX=null;
@@ -813,7 +820,7 @@ ${alertBox('d',I.dpct,I.cur,I.pcur,`${cl} (até dia ${I.day})`,`${pl} (até dia 
 /* ================= opções ================= */
 const fmtTs=ts=>ts?new Date(ts).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}):'nunca';
 function vOpt(){
- const bk=D.cfg.backup,perm=('Notification' in window)?Notification.permission:'unsupported';
+ const bk=D.cfg.backup,perm=notifState();
  const nxt=bk.every&&bk.lastSnap?fmtTs(bk.lastSnap+bk.every*3600e3):bk.every?'na próxima abertura':'—';
  const snaps=(S.snaps||[]);
  return `<div class="scr-h" style="padding-bottom:62px"><div class="top" style="margin-bottom:0"><h2 style="font-size:22px">Opções</h2></div></div>
@@ -822,7 +829,7 @@ function vOpt(){
  <div class="fld" style="margin-top:0"><label for="b_e">Frequência</label><select id="b_e" class="inp" data-f="bkEvery"><option value="0" ${!bk.every?'selected':''}>Desligado</option><option value="6" ${bk.every===6?'selected':''}>A cada 6 horas</option><option value="12" ${bk.every===12?'selected':''}>A cada 12 horas</option></select></div>
  <div class="fld"><label for="b_d">Onde salvar</label><select id="b_d" class="inp" data-f="bkDest"><option value="internal" ${bk.dest==='internal'?'selected':''}>Neste aparelho (cópias internas do app)</option><option value="file" ${bk.dest==='file'?'selected':''}>Arquivo .json (Drive, Downloads, compartilhar)</option>${S.dirOK?`<option value="folder" ${bk.dest==='folder'?'selected':''}>Pasta que eu escolher</option>`:''}</select></div>
  ${bk.dest==='folder'&&S.dirOK?`<div class="row" style="margin-bottom:10px"><button class="btn sm" data-a="bkpick">Escolher pasta</button><span class="hint" style="align-self:center;margin:0">${bk.dirName?esc(bk.dirName):'nenhuma pasta escolhida'}</span></div>`:''}
- ${!S.dirOK?'<div class="hint" style="margin-top:0">O Chrome do Android não permite escolher uma pasta fixa. Para guardar fora do app, use “Arquivo .json”: quando o backup vencer, o app pede um toque para enviar ao Drive ou salvar em Downloads.</div>':''}
+ ${!S.dirOK?'<div class="hint" style="margin-top:0">O Android não permite que o app grave numa pasta fixa. Para guardar fora do app, use “Arquivo .json”: quando o backup vencer, o app pede um toque e abre o menu de compartilhamento (Drive, Arquivos, e-mail).</div>':''}
  <div class="kv"><span>Última cópia interna</span><b>${fmtTs(bk.lastSnap)}</b></div><div class="kv"><span>Último arquivo externo</span><b>${fmtTs(bk.lastExt)}</b></div><div class="kv"><span>Próxima cópia</span><b>${nxt}</b></div>
  <div class="row" style="margin-top:12px"><button class="btn primary sm" data-a="bknow">Fazer backup agora</button><button class="btn sm" data-a="bkshare">Enviar para o Drive / compartilhar</button></div>
  ${snaps.length?`<div style="margin-top:14px"><span class="lbl">Cópias internas (toque para restaurar)</span>${snaps.map((s,i)=>`<button class="it" style="border-radius:12px;background:var(--bg);margin-bottom:6px" data-a="snaprestore" data-i="${i}"><span class="m"><div class="t">${fmtTs(s.ts)}</div><div class="s">${s.n} lançamentos · ${s.f} contas fixas</div></span><span class="chev">↺</span></button>`).join('')}</div>`:''}
@@ -831,10 +838,10 @@ function vOpt(){
 <section class="card opt"><h3>Categorias</h3><p>${CATS.length} categorias ativas, em ordem alfabética. Cadastre novas ou exclua as que não usa.</p><button class="btn" data-a="catmgr">Gerenciar categorias</button></section>
 <section class="card opt"><h3>Importar banco de dados</h3><p>Use ao trocar de celular: escolha um arquivo .json gerado pelo backup. Os dados atuais serão substituídos (uma cópia interna é guardada antes).</p><button class="btn" data-a="imp">Escolher arquivo de backup</button><input type="file" id="impf" accept=".json,application/json" hidden></section>
 <section class="card opt"><h3>Relatório em PDF</h3><p>Dashboard de ${ymLabel(S.ym)} com resumo, gráficos, sugestões e a lista de lançamentos do mês.</p><button class="btn primary" data-a="pdf">Gerar relatório em PDF</button></section>
-<section class="card opt"><h3>Notificações</h3><p>Estado: <b>${perm==='granted'?'permitidas':perm==='denied'?'bloqueadas':perm==='unsupported'?'indisponíveis neste navegador':'ainda não permitidas'}</b>. Os alertas das contas fixas disparam enquanto o app está aberto ou em segundo plano recente; para garantir aviso com o app fechado, exporte os lembretes para o calendário na aba Fixas.</p><div class="row">${perm==='default'?'<button class="btn sm primary" data-a="notif">Permitir notificações</button>':''}${perm==='granted'?'<button class="btn sm" data-a="notiftest">Enviar teste</button>':''}</div></section>
+<section class="card opt"><h3>Notificações</h3><p>Estado: <b>${perm==='granted'?'permitidas':perm==='denied'?'bloqueadas':perm==='unsupported'?'indisponíveis neste navegador':'ainda não permitidas'}</b>. ${NATIVE?'Os alertas das contas fixas são agendados no próprio Android e chegam na hora marcada, mesmo com o app fechado.':'Os alertas das contas fixas disparam enquanto o app está aberto ou em segundo plano recente; para garantir aviso com o app fechado, exporte os lembretes para o calendário na aba Fixas.'}</p><div class="row">${perm==='default'?'<button class="btn sm primary" data-a="notif">Permitir notificações</button>':''}${perm==='granted'?'<button class="btn sm" data-a="notiftest">Enviar teste</button>':''}</div></section>
 <section class="card opt"><h3>Armazenamento</h3><div class="kv"><span>Dados protegidos contra limpeza automática</span><b>${S.persisted==null?'—':S.persisted?'Sim':'Não'}</b></div><div class="kv"><span>Lançamentos</span><b>${D.tx.length}</b></div><div class="kv"><span>Contas fixas</span><b>${D.fixed.length}</b></div><p style="margin-top:10px">Os dados ficam só neste aparelho e neste endereço do app. Limpar os dados do navegador ou desinstalar o app apaga tudo, por isso mantenha o backup em dia.</p></section>
 <section class="card opt"><h3>Zona de risco</h3><p>Apaga todos os lançamentos, contas fixas e configurações deste aparelho.</p><button class="btn danger" data-a="wipe">Apagar todos os dados</button></section>
-<div class="hint" style="text-align:center">Meu Bolso · versão 1.2</div>
+<div class="hint" style="text-align:center">Meu Bolso · versão 1.4${NATIVE?' (app Android)':''}</div>
 <div class="endpad"></div></div>`;
 }
 
@@ -866,8 +873,14 @@ function render(){
 }
 
 /* ================= arquivos ================= */
+const blobB64=b=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=()=>rej(r.error);r.readAsDataURL(b)});
 async function saveFile(name,data,mime,opt={}){
  const blob=data instanceof Blob?data:new Blob([data],{type:mime});
+ if(NATIVE&&PL('Filesystem')&&PL('Share')){
+  try{const w=await PL('Filesystem').writeFile({path:name,data:await blobB64(blob),directory:'CACHE'});
+   await PL('Share').share({title:name,files:[w.uri],dialogTitle:'Salvar ou enviar arquivo'});return 'ok'}
+  catch(e){return e&&/cancel/i.test(String(e.message||e))?'declined':'error'}
+ }
  if(S.cap.dl){try{await S.cap.dl.save({filename:name,data:blob});return 'ok'}catch(e){if(e&&e.code==='declined')return 'declined'}}
  if(opt.share&&navigator.canShare){try{const file=new File([blob],name,{type:mime});if(navigator.canShare({files:[file]})){await navigator.share({files:[file],title:name});return 'ok'}}catch(e){if(e&&e.name==='AbortError')return 'declined'}}
  try{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},4000);return 'ok'}catch(e){return 'error'}
@@ -929,12 +942,55 @@ function importObject(o,label){
 }
 
 /* ================= notificações ================= */
+const notifState=()=>NATIVE?(S.nperm||'default'):(('Notification' in window)?Notification.permission:'unsupported');
+const nid=k=>{let h=7;for(let i=0;i<k.length;i++)h=(h*31+k.charCodeAt(i))|0;return Math.abs(h)%2147483000+1};
+async function refreshNative(){
+ const ln=PL('LocalNotifications');if(!ln)return;
+ try{const r=await ln.checkPermissions();S.nperm=r.display==='granted'?'granted':r.display==='denied'?'denied':'default'}catch(e){}
+ try{const x=await ln.checkExactNotificationSetting();S.nexact=x.exact_alarm}catch(e){S.nexact='granted'}
+ if(!S.ov.length&&(S.tab==='fix'||S.tab==='opt'))render();
+}
+async function syncNative(){
+ const ln=PL('LocalNotifications');if(!ln||S.nperm!=='granted')return;
+ try{
+  await ln.createChannel({id:'contas',name:'Contas a pagar',description:'Alertas de vencimento das contas fixas',importance:5,visibility:1,vibration:true});
+  const pend=await ln.getPending();
+  if(pend.notifications&&pend.notifications.length)await ln.cancel({notifications:pend.notifications.map(n=>({id:n.id}))});
+  const now=Date.now(),cur=todayStr().slice(0,7),list=[];
+  for(const b of D.fixed){
+   if(!b.alert)continue;
+   for(let i=-1;i<14;i++){
+    const ym=ymAdd(cur,i);if(!activeIn(b,ym)||isPaid(b,ym))continue;
+    const at=alertAt(b,ym);if(at.getTime()<=now)continue;
+    list.push({id:nid(`${b.id}:${ym}`),title:'Conta a pagar: '+b.desc,body:`${fmt(b.v)} · vence ${fmtDate(dateInYM(ym,b.day))}`,channelId:'contas',schedule:{at,allowWhileIdle:true}});
+   }
+  }
+  list.sort((a,b)=>a.schedule.at-b.schedule.at);
+  if(list.length)await ln.schedule({notifications:list.slice(0,60)});
+ }catch(e){}
+}
 async function askNotif(){
+ if(NATIVE){
+  const ln=PL('LocalNotifications');if(!ln){toast('Notificações indisponíveis');return}
+  try{const r=await ln.requestPermissions();S.nperm=r.display==='granted'?'granted':r.display==='denied'?'denied':'default'}catch(e){}
+  toast(S.nperm==='granted'?'Notificações ativadas':'Notificações não permitidas');
+  await refreshNative();
+  if(S.nperm==='granted'){
+   if(S.nexact&&S.nexact!=='granted')dlg('Permitir alarmes exatos','Para os avisos chegarem na hora marcada, libere "Alarmes e lembretes" para o Meu Bolso na próxima tela.',[{t:'Abrir configuração',cls:'primary',fn:()=>{try{ln.changeExactNotificationSetting()}catch(e){}}},{t:'Agora não',cls:'ghost'}]);
+   syncNative();
+  }
+  render();return;
+ }
  if(!('Notification' in window)){toast('Este navegador não suporta notificações');return}
  try{const p=await Notification.requestPermission();toast(p==='granted'?'Notificações ativadas':'Notificações não permitidas')}catch(e){}
  render();if(Notification.permission==='granted'){checkAlerts();scheduleTriggers()}
 }
 async function notify(title,body,tag){
+ if(NATIVE){
+  try{const ln=PL('LocalNotifications');if(!ln||S.nperm!=='granted')return false;
+   await ln.createChannel({id:'contas',name:'Contas a pagar',description:'Alertas de vencimento das contas fixas',importance:5,visibility:1,vibration:true});
+   await ln.schedule({notifications:[{id:nid(tag+Date.now()),title,body,channelId:'contas',schedule:{at:new Date(Date.now()+1500),allowWhileIdle:true}}]});return true}catch(e){return false}
+ }
  try{
   if(!('Notification' in window)||Notification.permission!=='granted')return false;
   const reg=S.swReg||(navigator.serviceWorker&&navigator.serviceWorker.getRegistration?await navigator.serviceWorker.getRegistration():null);
@@ -943,6 +999,7 @@ async function notify(title,body,tag){
  }catch(e){return false}
 }
 function checkAlerts(){
+ if(NATIVE)return;
  if(!('Notification' in window)||Notification.permission!=='granted')return;
  const now=new Date(),cur=todayStr().slice(0,7),seen=new Set(D.cfg.notified||[]);let changed=false;
  for(const b of D.fixed){
@@ -957,6 +1014,7 @@ function checkAlerts(){
 }
 async function scheduleTriggers(){
  try{
+  if(NATIVE)return;
   if(!('Notification' in window)||!('showTrigger' in Notification.prototype)||typeof TimestampTrigger==='undefined'||Notification.permission!=='granted')return;
   const reg=S.swReg||await navigator.serviceWorker.ready,now=Date.now(),cur=todayStr().slice(0,7);
   (await reg.getNotifications({includeTriggered:false})).forEach(n=>n.close());
@@ -1052,7 +1110,7 @@ async function makePDF(){
  I.tips.slice(0,3).forEach(t=>{rr(60,yy-30,W-120,150,16,THEME.ai1L);T(fit(t.name,700,26,800),84,yy+8,26,800,'#2A0F45');T('economizar até '+fmt(t.cut),W-84,yy+8,26,800,THEME.p,'right');
   const words=(t.why+' '+t.text).split(' ');let line='',ly=yy+48;for(const w of words){const tst=line?line+' '+w:w;x.font=`500 21px ${F0}`;if(x.measureText(tst).width>W-190){T(line,84,ly,21,500,'#4B3A5C');ly+=30;line=w}else line=tst}T(line,84,ly,21,500,'#4B3A5C');yy+=175});
  // ---- lançamentos
- const list=txMonth(ym).sort((a,b)=>a.date.localeCompare(b.date)),per=30;
+ const list=txMonth(ym).filter(t=>!t.card).sort((a,b)=>a.date.localeCompare(b.date)),per=30;
  for(let p=0;p<Math.max(1,Math.ceil(list.length/per));p++){
   newPage();head('Lançamentos do mês',`${ymLabel(ym)} · ${list.length} lançamento${list.length===1?'':'s'}`);
   rr(60,250,W-120,52,12,THEME.chipL);T('Data',80,284,22,800,THEME.p);T('Descrição',190,284,22,800,THEME.p);T('Categoria',650,284,22,800,THEME.p);T('Forma',930,284,22,800,THEME.p);T('Valor',W-80,284,22,800,THEME.p,'right');
@@ -1095,6 +1153,7 @@ const ACT={
  new(){openForm()},
  edit(el){openForm(el.dataset.id)},
  cardopen(){S.cm=todayStr().slice(0,7);ovOpen('card',cardHtml());const o=$('#ov-card');if(o)o.scrollTop=0},
+ cardnew(){openForm();F.card=true;F.kind='conta';F.sav=false;F.date=S.cm===todayStr().slice(0,7)?todayStr():S.cm+'-01';F.start=S.cm;F.startTouched=false;renderForm()},
  cym(el){S.cm=ymAdd(S.cm,+el.dataset.d);ovSet('card',cardHtml())},
  cymnow(){S.cm=todayStr().slice(0,7);ovSet('card',cardHtml())},
  theme(el){D.cfg.theme=el.dataset.k;applyTheme(D.cfg.theme);try{localStorage.setItem('mb_theme',THEME.name)}catch(e){}persist();render();toast('Cor alterada')},
@@ -1194,7 +1253,7 @@ async function initCaps(){
  S.cap.dl=dl||null;S.cap.sample=sm||null;if(!S.ov.length)render();
 }
 function registerSW(){
- if(!('serviceWorker' in navigator)||!/^https?:$/.test(location.protocol)||window.top!==window.self)return;
+ if(NATIVE||!('serviceWorker' in navigator)||!/^https?:$/.test(location.protocol)||window.top!==window.self)return;
  navigator.serviceWorker.register('sw.js').then(r=>{S.swReg=r}).catch(()=>{});
 }
 async function boot(){
@@ -1206,7 +1265,9 @@ async function boot(){
  S.snaps=Array.isArray(snaps)?snaps:[];
  S.dirOK=typeof window.showDirectoryPicker==='function'&&window.top===window.self;
  render();registerSW();initCaps();
+ if(NATIVE){const sb=PL('SystemBars');if(sb)sb.setStyle({style:'DARK',bar:'StatusBar'}).catch(()=>{});refreshNative().then(syncNative);document.addEventListener('resume',()=>refreshNative().then(syncNative))}
  if(navigator.storage&&navigator.storage.persist){navigator.storage.persist().then(p=>{S.persisted=p;if(S.tab==='opt'&&!S.ov.length)render()}).catch(()=>{})}
+ S.dirOK=S.dirOK&&!NATIVE;
  if(!ok)setTimeout(()=>toast('Armazenamento local indisponível: os dados valem só até fechar o app'),800);
  checkAlerts();autoBackupTick();showBkBar();scheduleTriggers();
  setInterval(()=>{checkAlerts();autoBackupTick()},60000);
