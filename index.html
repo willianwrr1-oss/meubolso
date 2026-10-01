@@ -318,7 +318,8 @@ const cardAfter=ym=>D.tx.reduce((s,t)=>s+(t.card&&t.date.slice(0,7)>ym?t.v:0),0)
 function catTotals(ym,upToDay){const o={};for(const t of D.tx){if(t.sav||t.kind!=='conta'||!t.date.startsWith(ym))continue;if(upToDay&&+t.date.slice(8,10)>upToDay)continue;o[t.cat]=(o[t.cat]||0)+t.v}return o}
 const spendOf=(ym,day)=>{let s=0;for(const t of D.tx){if(t.sav||t.kind!=='conta'||!t.date.startsWith(ym))continue;if(day&&+t.date.slice(8,10)>day)continue;s+=t.v}return s};
 const incomeOf=ym=>{let s=0;for(const t of D.tx)if(!t.sav&&t.kind==='receita'&&t.date.startsWith(ym))s+=t.v;return s};
-const billsFor=ym=>D.fixed.filter(b=>b.start<=ym).sort((a,b)=>a.day-b.day);
+const activeIn=(b,ym)=>ym>=b.start&&(!b.months||ym<=ymAdd(b.start,b.months-1));
+const billsFor=ym=>D.fixed.filter(b=>activeIn(b,ym)).sort((a,b)=>a.day-b.day);
 const payKey=(b,ym)=>`fx:${b.id}:${ym}`;
 const isPaid=(b,ym)=>D.tx.some(t=>t.src===payKey(b,ym));
 const alertAt=(b,ym)=>{const d=new Date(dateInYM(ym,b.day)+'T'+(b.time||'09:00')+':00');d.setDate(d.getDate()-(b.before||0));return d};
@@ -725,7 +726,7 @@ function vFix(){
  const rows=bills.map(b=>{
   const p=isPaid(b,ym),due=dateInYM(ym,b.day),late=!p&&due<today;
   const al=b.alert?`Alerta ${b.before?b.before+(b.before>1?' dias antes':' dia antes'):'no dia'}, ${b.time}`:'Sem alerta';
-  return `<div class="fx"><button class="chk ${p?'on':''}" data-a="fxpaid" data-id="${b.id}" aria-label="${p?'Desmarcar pagamento':'Marcar como paga'}">${p?'✓':''}</button><button class="m" data-a="fxedit" data-id="${b.id}"><div class="t">${esc(b.desc)}${p?'<span class="tag g">Paga</span>':late?'<span class="tag r">Em atraso</span>':''}</div><div class="s">Vence ${fmtDate(due)} · ${al}</div></button><div class="a ${p?'pos':''}" style="font-weight:800;white-space:nowrap">${fmt(b.v)}</div></div>`}).join('');
+  return `<div class="fx"><button class="chk ${p?'on':''}" data-a="fxpaid" data-id="${b.id}" aria-label="${p?'Desmarcar pagamento':'Marcar como paga'}">${p?'✓':''}</button><button class="m" data-a="fxedit" data-id="${b.id}"><div class="t">${esc(b.desc)}${p?'<span class="tag g">Paga</span>':late?'<span class="tag r">Em atraso</span>':''}</div><div class="s">Vence ${fmtDate(due)} · ${b.months===1?'só este mês':b.months>1?`mês ${(+ym.slice(0,4)-+b.start.slice(0,4))*12+(+ym.slice(5,7)-+b.start.slice(5,7))+1} de ${b.months}`:'todo mês'} · ${al}</div></button><div class="a ${p?'pos':''}" style="font-weight:800;white-space:nowrap">${fmt(b.v)}</div></div>`}).join('');
  return `<div class="scr-h"><div class="top" style="margin-bottom:12px"><h2 style="font-size:22px">Contas fixas</h2></div>${monthNav()}</div>
 <div class="body pull">
 <section class="card"><div class="grid2"><div><div class="k">Total das contas fixas</div><div class="v">${fmt(total)}</div></div><div><div class="k">Já pago</div><div class="v pos">${fmt(paid)}</div></div></div>
@@ -738,7 +739,8 @@ ${bills.length?`<section class="card opt" style="margin-top:14px"><h3>Lembretes 
 <div class="endpad"></div></div>`;
 }
 let FX=null;
-const newFX=()=>({id:null,edit:false,desc:'',v:0,date:S.ym===todayStr().slice(0,7)?todayStr():S.ym+'-10',cat:'moradia',alert:true,before:1,time:'09:00',err:''});
+const newFX=()=>{const date=S.ym===todayStr().slice(0,7)?todayStr():S.ym+'-10';return{id:null,edit:false,desc:'',v:0,date,start:ymOf(date),rec:'rep',inf:true,n:12,cat:'moradia',alert:true,before:1,time:'09:00',err:''}};
+const fxPreview=f=>f.rec==='once'?`Somente em ${ymLabel(f.start)}.`:f.inf?`A partir de ${ymLabel(f.start)}, todo mês, até você excluir a conta.`:(f.n>=2?`${f.n} meses: de ${ymShort(f.start)} a ${ymShort(ymAdd(f.start,f.n-1))}.`:'Informe de 2 a 120 meses.');
 function fxHtml(){
  const f=FX,cats=catsFor('d');
  const opts=[[0,'No dia do vencimento'],[1,'1 dia antes'],[2,'2 dias antes'],[3,'3 dias antes'],[5,'5 dias antes'],[7,'7 dias antes']];
@@ -746,22 +748,25 @@ function fxHtml(){
  <div class="fld"><label for="x_d">Descrição</label><input id="x_d" class="inp" data-f="x_desc" maxlength="60" placeholder="Ex.: aluguel, internet" value="${esc(f.desc)}"></div>
  <div class="fld"><label for="x_v">Valor</label><input id="x_v" class="inp money" data-f="x_v" data-mask="money" inputmode="numeric" placeholder="0,00" value="${f.v?fmtN(f.v):''}"></div>
  <div class="fld"><label for="x_dt">Data do pagamento (repete todo mês)</label><input id="x_dt" type="date" class="inp" data-f="x_date" value="${f.date}"></div>
+ <div class="fld"><span class="lbl">Repetição</span><div class="seg"><button class="${f.rec==='once'?'on':''}" data-a="fxrec" data-v="once">Somente este mês</button><button class="${f.rec==='rep'?'on':''}" data-a="fxrec" data-v="rep">Recorrente</button></div></div>
+ ${f.rec==='rep'?`<div class="sub-box"><button class="swr" style="margin-top:8px" data-a="fxinf" role="switch" aria-checked="${f.inf}"><span><b>Sem data final</b><small>Repete todo mês até você excluir</small></span><span class="sw ${f.inf?'on':''}"></span></button>${f.inf?'':`<div class="fld"><label for="x_n">Por quantos meses (contando o mês do vencimento)</label><input id="x_n" class="inp" type="number" min="2" max="120" inputmode="numeric" data-f="x_n" value="${f.n||''}" style="max-width:160px"></div>`}<div class="hint" id="x_prev">${fxPreview(f)}</div></div>`:`<div class="hint" id="x_prev">${fxPreview(f)}</div>`}
  <div class="fld"><label for="x_c">Categoria</label><select id="x_c" class="inp" data-f="x_cat">${cats.map(c=>`<option value="${c.id}" ${f.cat===c.id?'selected':''}>${c.ico} ${esc(c.name)}</option>`).join('')}</select></div>
  <button class="swr" data-a="fxalert" role="switch" aria-checked="${f.alert}"><span><b>Alerta de notificação</b><small>Aviso no celular antes do vencimento</small></span><span class="sw ${f.alert?'on':''}"></span></button>
  ${f.alert?`<div class="sub-box"><div class="fld"><label for="x_b">Quando avisar</label><select id="x_b" class="inp" data-f="x_before">${opts.map(([n,l])=>`<option value="${n}" ${f.before===n?'selected':''}>${l}</option>`).join('')}</select></div><div class="fld"><label for="x_t">Horário do alerta</label><input id="x_t" type="time" class="inp" data-f="x_time" value="${f.time}"></div></div>`:''}
  </div>${f.err?`<div class="err" style="padding:0 18px">${esc(f.err)}</div>`:''}<div class="sh-f">${f.edit?'<button class="btn danger" data-a="fxdel">Excluir</button>':''}<button class="btn primary" data-a="fxsave">Salvar</button></div></div>`;
 }
 const renderFX=()=>ovSet('fxform',fxHtml());
-function openFX(id){const b=id&&D.fixed.find(x=>x.id===id);FX=b?{id:b.id,edit:true,desc:b.desc,v:b.v,date:dateInYM(S.ym,b.day),cat:b.cat||'moradia',alert:!!b.alert,before:b.before||0,time:b.time||'09:00',err:''}:newFX();ovOpen('fxform',fxHtml(),'sheetbg')}
+function openFX(id){const b=id&&D.fixed.find(x=>x.id===id);FX=b?{id:b.id,edit:true,desc:b.desc,v:b.v,date:dateInYM(S.ym,b.day),start:b.start,rec:b.months===1?'once':'rep',inf:!b.months,n:b.months>1?b.months:12,cat:b.cat||'moradia',alert:!!b.alert,before:b.before||0,time:b.time||'09:00',err:''}:newFX();ovOpen('fxform',fxHtml(),'sheetbg')}
 function saveFX(){
  const f=FX;f.err='';
  if(!f.desc.trim())f.err='Informe a descrição da conta.';
  else if(!f.v)f.err='Informe o valor da conta.';
  else if(!isValidDate(f.date))f.err='Informe a data do pagamento.';
+ else if(f.rec==='rep'&&!f.inf&&!(Number.isInteger(f.n)&&f.n>=2&&f.n<=120))f.err='Informe por quantos meses a conta se repete (de 2 a 120).';
  else if(f.alert&&!/^\d{2}:\d{2}$/.test(f.time))f.err='Informe o horário do alerta.';
  if(f.err){renderFX();return}
  const old=f.id&&D.fixed.find(x=>x.id===f.id);
- const b={id:f.id||uid(),desc:f.desc.trim(),v:f.v,day:+f.date.slice(8,10),start:old?old.start:ymOf(f.date),cat:f.cat,alert:f.alert,before:+f.before,time:f.time};
+ const b={id:f.id||uid(),desc:f.desc.trim(),v:f.v,day:+f.date.slice(8,10),start:old?old.start:ymOf(f.date),months:f.rec==='once'?1:f.inf?0:f.n,cat:f.cat,alert:f.alert,before:+f.before,time:f.time};
  D.fixed=D.fixed.filter(x=>x.id!==b.id);D.fixed.push(b);persist();closeTop();render();toast('Conta fixa salva');
  if(b.alert&&'Notification' in window&&Notification.permission==='default')dlg('Ativar notificações?','Para receber o alerta desta conta no celular, permita as notificações do app.',[{t:'Permitir',cls:'primary',fn:()=>askNotif()},{t:'Agora não',cls:'ghost'}]);
  scheduleTriggers();
@@ -827,7 +832,7 @@ function vOpt(){
 <section class="card opt"><h3>Notificações</h3><p>Estado: <b>${perm==='granted'?'permitidas':perm==='denied'?'bloqueadas':perm==='unsupported'?'indisponíveis neste navegador':'ainda não permitidas'}</b>. Os alertas das contas fixas disparam enquanto o app está aberto ou em segundo plano recente; para garantir aviso com o app fechado, exporte os lembretes para o calendário na aba Fixas.</p><div class="row">${perm==='default'?'<button class="btn sm primary" data-a="notif">Permitir notificações</button>':''}${perm==='granted'?'<button class="btn sm" data-a="notiftest">Enviar teste</button>':''}</div></section>
 <section class="card opt"><h3>Armazenamento</h3><div class="kv"><span>Dados protegidos contra limpeza automática</span><b>${S.persisted==null?'—':S.persisted?'Sim':'Não'}</b></div><div class="kv"><span>Lançamentos</span><b>${D.tx.length}</b></div><div class="kv"><span>Contas fixas</span><b>${D.fixed.length}</b></div><p style="margin-top:10px">Os dados ficam só neste aparelho e neste endereço do app. Limpar os dados do navegador ou desinstalar o app apaga tudo, por isso mantenha o backup em dia.</p></section>
 <section class="card opt"><h3>Zona de risco</h3><p>Apaga todos os lançamentos, contas fixas e configurações deste aparelho.</p><button class="btn danger" data-a="wipe">Apagar todos os dados</button></section>
-<div class="hint" style="text-align:center">Meu Bolso · versão 1.1</div>
+<div class="hint" style="text-align:center">Meu Bolso · versão 1.2</div>
 <div class="endpad"></div></div>`;
 }
 
@@ -911,7 +916,7 @@ function showBkBar(){
 function importObject(o,label){
  if(!o||o.app!=='meubolso'||!Array.isArray(o.tx)||!Array.isArray(o.fixed)){toast('Este arquivo não é um backup do Meu Bolso');return}
  const tx=o.tx.filter(t=>t&&typeof t.id==='string'&&typeof t.date==='string'&&isValidDate(t.date)&&Number.isFinite(t.v)&&t.v>0);
- const fx=o.fixed.filter(b=>b&&typeof b.id==='string'&&b.desc&&Number.isFinite(b.v)&&b.day>=1&&b.day<=31&&/^\d{4}-\d{2}$/.test(b.start));
+ const fx=o.fixed.filter(b=>b&&typeof b.id==='string'&&b.desc&&Number.isFinite(b.v)&&b.day>=1&&b.day<=31&&/^\d{4}-\d{2}$/.test(b.start)).map(b=>({...b,months:Number.isInteger(b.months)&&b.months>0?b.months:0}));
  dlg('Substituir dados atuais?',`${label}\nContém ${tx.length} lançamentos e ${fx.length} contas fixas. Uma cópia interna dos dados atuais será guardada antes.`,[
   {t:'Importar e substituir',cls:'primary',fn:()=>{saveSnap();D.tx=tx;D.fixed=fx;if(o.cfg){if(o.cfg.goal)D.cfg.goal=o.cfg.goal;if(o.cfg.yield!=null)D.cfg.yield=o.cfg.yield;
    if(Array.isArray(o.cfg.cats)){const have=new Set((D.cfg.cats||[]).map(c=>c.id));D.cfg.cats=(D.cfg.cats||[]).concat(o.cfg.cats.filter(c=>c&&typeof c.id==='string'&&c.name&&['r','d','b'].includes(c.k)&&!have.has(c.id)&&!BASE_CATS.some(b=>b.id===c.id)).map(c=>({id:c.id,name:String(c.name).slice(0,32),ico:String(c.ico||'🏷️').slice(0,8),k:c.k})))}
@@ -941,7 +946,7 @@ function checkAlerts(){
  for(const b of D.fixed){
   if(!b.alert)continue;
   for(const ym of [ymAdd(cur,-1),cur,ymAdd(cur,1)]){
-   if(ym<b.start||isPaid(b,ym))continue;
+   if(!activeIn(b,ym)||isPaid(b,ym))continue;
    const at=alertAt(b,ym),key=`${b.id}:${ym}`;
    if(at<=now&&now-at<48*3600e3&&!seen.has(key)){seen.add(key);changed=true;notify('Conta a pagar: '+b.desc,`${fmt(b.v)} · vence ${fmtDate(dateInYM(ym,b.day))}`,key)}
   }
@@ -955,7 +960,7 @@ async function scheduleTriggers(){
   (await reg.getNotifications({includeTriggered:false})).forEach(n=>n.close());
   for(const b of D.fixed){
    if(!b.alert)continue;
-   for(let i=0;i<3;i++){const ym=ymAdd(cur,i);if(ym<b.start||isPaid(b,ym))continue;const at=alertAt(b,ym).getTime();
+   for(let i=0;i<3;i++){const ym=ymAdd(cur,i);if(!activeIn(b,ym)||isPaid(b,ym))continue;const at=alertAt(b,ym).getTime();
     if(at>now)await reg.showNotification('Conta a pagar: '+b.desc,{tag:`${b.id}:${ym}`,body:`${fmt(b.v)} · vence ${fmtDate(dateInYM(ym,b.day))}`,icon:'icon-192.png',showTrigger:new TimestampTrigger(at)})}
   }
  }catch(e){}
@@ -965,7 +970,7 @@ const icsE=s=>String(s).replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'
 function icsText(bills){
  const L=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Meu Bolso//PT-BR','CALSCALE:GREGORIAN'],stamp=icsD(new Date())+'',cur=todayStr().slice(0,7);
  for(const b of bills)for(let i=0;i<12;i++){
-  const ym=ymAdd(cur,i);if(ym<b.start||isPaid(b,ym))continue;
+  const ym=ymAdd(cur,i);if(!activeIn(b,ym)||isPaid(b,ym))continue;
   const due=dateInYM(ym,b.day),st=b.alert?alertAt(b,ym):new Date(due+'T09:00:00'),en=new Date(st.getTime()+30*60000);
   L.push('BEGIN:VEVENT',`UID:${b.id}-${ym}@meubolso`,`DTSTAMP:${stamp}`,`DTSTART:${icsD(st)}`,`DTEND:${icsD(en)}`,`SUMMARY:${icsE('Pagar '+b.desc+' - '+fmt(b.v))}`,`DESCRIPTION:${icsE('Vence em '+fmtDateFull(due))}`,'BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:Conta a pagar','TRIGGER:PT0M','END:VALARM','END:VEVENT');
  }
@@ -1126,6 +1131,8 @@ const ACT={
  fxnew(){openFX()},
  fxedit(el){openFX(el.dataset.id)},
  fxalert(){FX.alert=!FX.alert;renderFX()},
+ fxrec(el){FX.rec=el.dataset.v;renderFX()},
+ fxinf(){FX.inf=!FX.inf;renderFX()},
  fxsave(){saveFX()},
  fxdel(){const id=FX.id;dlg('Excluir conta fixa','Os pagamentos já registrados nos lançamentos serão mantidos. Excluir esta conta fixa?',[{t:'Excluir',cls:'danger',fn:()=>{D.fixed=D.fixed.filter(b=>b.id!==id);persist();closeTop();render();toast('Conta fixa excluída');scheduleTriggers()}},{t:'Cancelar',cls:'ghost'}])},
  fxpaid(el){togglePaid(el.dataset.id)},
@@ -1150,6 +1157,7 @@ document.addEventListener('click',e=>{
 document.addEventListener('input',e=>{
  const el=e.target,f=el.dataset&&el.dataset.f;if(!f)return;
  if(el.dataset.mask==='money'){const c=maskMoney(el);if(f==='v'){F.v=c;const p=$('#f_prev');if(p)p.textContent=cardPreview(F)}else if(f==='x_v')FX.v=c;return}
+ if(f==='x_n'){FX.n=parseInt(el.value,10)||0;const p=$('#x_prev');if(p)p.textContent=fxPreview(FX);return}
  if(f==='cn_name'){CN.name=el.value;return}if(f==='cn_ico'){CN.ico=el.value;return}
  if(f==='desc')F.desc=el.value;else if(f==='x_desc')FX.desc=el.value;else if(f==='q'){S.f.q=el.value;render()}
 });
@@ -1164,7 +1172,7 @@ document.addEventListener('change',e=>{
   case 'N':F.N=+el.value;renderForm();break;
   case 'start':F.start=el.value;F.startTouched=true;renderForm();break;
   case 'fcat':S.f.cat=el.value;render();break;
-  case 'x_date':FX.date=el.value;break;
+  case 'x_date':FX.date=el.value;if(!FX.edit&&isValidDate(FX.date))FX.start=ymOf(FX.date);renderFX();break;
   case 'x_cat':FX.cat=el.value;break;
   case 'x_before':FX.before=+el.value;break;
   case 'x_time':FX.time=el.value;break;
