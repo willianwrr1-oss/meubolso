@@ -188,6 +188,8 @@ table.tb{border-collapse:separate;border-spacing:0;font-size:13px;min-width:100%
 .catrow .m{flex:1;min-width:0}
 .catrow .t{font-weight:700}
 .catrow .s{font-size:12.5px;color:var(--mut)}
+.tb thead th{white-space:normal;line-height:1.2;vertical-align:bottom;min-width:96px}
+.tb thead th:first-child{min-width:0}
 
 </style>
 </head>
@@ -689,7 +691,7 @@ function vSav(){
  let dep=0,res=0;for(const t of D.tx)if(t.sav&&t.date.startsWith(String(y)))t.mov==='credito'?dep+=t.v:res+=t.v;
  const cell=v=>v?`<span class="${v<0?'neg':''}">${fmtN(v)}</span>`:'<span class="mut">–</span>';
  const hasPrior=sy.opening!==0||sy.banks.some(([,o])=>o.prior!==0);
- const table=sy.banks.length?`<div class="tbl-w"><table class="tb"><thead><tr><th>Banco</th>${hasPrior?`<th>Até ${y-1}</th>`:''}${sy.months.map(m=>`<th>${MESC[+m.slice(5,7)-1]}</th>`).join('')}<th>Total</th></tr></thead><tbody>${sy.banks.map(([b,o])=>`<tr><td>${esc(b)}</td>${hasPrior?`<td>${cell(o.prior)}</td>`:''}${sy.months.map(m=>`<td>${cell(o.m[m])}</td>`).join('')}<td><b>${fmtN(o.total)}</b></td></tr>`).join('')}<tr class="tot"><td>Total</td>${hasPrior?`<td>${fmtN(sy.opening)}</td>`:''}${sy.months.map(m=>`<td>${fmtN(sy.mtot[m])}</td>`).join('')}<td>${fmtN(sy.end)}</td></tr></tbody></table></div><div class="hint">Valores em R$. Meses sem movimentação e bancos sem depósitos ficam ocultos. Resgates aparecem em vermelho.</div>`
+ const table=sy.banks.length?`<div class="tbl-w"><table class="tb"><thead><tr><th>Mês</th>${sy.banks.map(([b])=>`<th>${esc(b)}</th>`).join('')}<th>Total</th></tr></thead><tbody>${hasPrior?`<tr><td>Até ${y-1}</td>${sy.banks.map(([,o])=>`<td>${cell(o.prior)}</td>`).join('')}<td><b>${fmtN(sy.opening)}</b></td></tr>`:''}${sy.months.map(m=>`<tr><td>${MES[+m.slice(5,7)-1]}</td>${sy.banks.map(([,o])=>`<td>${cell(o.m[m])}</td>`).join('')}<td><b>${fmtN(sy.mtot[m])}</b></td></tr>`).join('')}<tr class="tot"><td>Total</td>${sy.banks.map(([,o])=>`<td>${fmtN(o.total)}</td>`).join('')}<td>${fmtN(sy.end)}</td></tr></tbody></table></div><div class="hint">Valores em R$. Meses sem movimentação e bancos sem depósitos ficam ocultos. Resgates aparecem em vermelho.</div>`
   :`<div class="empty">Nenhum depósito na poupança até ${y}.<br>Cadastre um lançamento marcando <b>Poupança</b>.</div>`;
  const steps=[];
  if(sy.opening!==0)steps.push({l:'Início',l2:'até '+(y-1),v:sy.opening,t:'total'});
